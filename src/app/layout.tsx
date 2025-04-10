@@ -26,9 +26,11 @@ export default function RootLayout({
   return (
     <html lang="en">
       <head>
+        {/* Load Google Fonts with proper display setting */}
         <link
           href="https://fonts.googleapis.com/css2?family=Caveat&family=Homemade+Apple&family=Indie+Flower&family=Reenie+Beanie&family=Rock+Salt&family=Dancing+Script&family=Kalam&display=swap"
           rel="stylesheet"
+          crossOrigin="anonymous"
         />
       </head>
       <body

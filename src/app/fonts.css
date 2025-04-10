@@ -1,3 +1,4 @@
+/* Custom handwriting fonts with improved paths and formats */
 @font-face {
     font-family: 'QEBradenHill';
     src: url('/fonts/QEBradenHill.ttf') format('truetype');
@@ -12,4 +13,41 @@
     font-weight: normal;
     font-style: normal;
     font-display: swap;
+}
+
+/* Add fallback classes to ensure font rendering */
+.font-caveat {
+    font-family: 'Caveat', cursive;
+}
+
+.font-homemade-apple {
+    font-family: 'Homemade Apple', cursive;
+}
+
+.font-indie-flower {
+    font-family: 'Indie Flower', cursive;
+}
+
+.font-reenie-beanie {
+    font-family: 'Reenie Beanie', cursive;
+}
+
+.font-rock-salt {
+    font-family: 'Rock Salt', cursive;
+}
+
+.font-dancing-script {
+    font-family: 'Dancing Script', cursive;
+}
+
+.font-kalam {
+    font-family: 'Kalam', cursive;
+}
+
+.font-qe-braden-hill {
+    font-family: 'QEBradenHill', cursive;
+}
+
+.font-qe-david-reid {
+    font-family: 'QEDavidReid', cursive;
 }
