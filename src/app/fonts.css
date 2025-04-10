@@ -1,0 +1,15 @@
+@font-face {
+    font-family: 'QEBradenHill';
+    src: url('/fonts/QEBradenHill.ttf') format('truetype');
+    font-weight: normal;
+    font-style: normal;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'QEDavidReid';
+    src: url('/fonts/QEDavidReid.ttf') format('truetype');
+    font-weight: normal;
+    font-style: normal;
+    font-display: swap;
+}

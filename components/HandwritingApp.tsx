@@ -1,11 +1,14 @@
 import { useState, useRef, useEffect } from "react";
+import html2canvas from "html2canvas";
+import jsPDF from "jspdf";
 
 // Rich text editor with handwriting simulation on A4 paper
-export default function AdvancedHandwritingApp() {
+export default function EnhancedHandwritingApp() {
   const [content, setContent] = useState("");
   const [font, setFont] = useState("Caveat");
   const [color, setColor] = useState("#2563eb");
   const [pages, setPages] = useState([]);
+  const [pageHeaders, setPageHeaders] = useState({});
   const editorRef = useRef(null);
   const previewRef = useRef(null);
 
@@ -15,6 +18,8 @@ export default function AdvancedHandwritingApp() {
     { name: "Reenie Beanie", label: "Quick Notes" },
     { name: "Rock Salt", label: "Blocky Letters" },
     { name: "Indie Flower", label: "School Notes" },
+    { name: "QEBradenHill", label: "Braden Hill" },
+    { name: "QEDavidReid", label: "David Reid" },
     { name: "Dancing Script", label: "Elegant Script" },
     { name: "Kalam", label: "Natural Notes" },
   ];
@@ -42,10 +47,25 @@ export default function AdvancedHandwritingApp() {
   const [isHeading, setIsHeading] = useState(false);
   const [isQuestion, setIsQuestion] = useState(false);
 
+  // Line height for ruled paper to ensure text alignment with lines
+  const lineHeight = 24;
+  const footerHeight = 80; // Footer space height in pixels
+
   useEffect(() => {
     // Process the content and split into A4 pages
     paginateContent();
   }, [content, font, color, paperStyle, isBold, isHeading, isQuestion]);
+
+  // Initialize headers for each page
+  useEffect(() => {
+    const initialHeaders = {};
+    pages.forEach((page, index) => {
+      if (!pageHeaders[index]) {
+        initialHeaders[index] = `Notes - ${page.meta.pageNumber}`;
+      }
+    });
+    setPageHeaders((prev) => ({ ...prev, ...initialHeaders }));
+  }, [pages]);
 
   const paginateContent = () => {
     if (!content) {
@@ -58,15 +78,26 @@ export default function AdvancedHandwritingApp() {
 
     // Calculate characters per A4 page (rough estimate)
     // A4 dimensions are 210mm x 297mm
-    const charsPerPage = 1800; // This would be calculated more precisely in a real implementation
+    // Account for header and footer space
+    const writableHeight =
+      paperStyle === "ruled" ? 842 - 80 - footerHeight : 842 - 80;
+    const linesPerPage = Math.floor(writableHeight / lineHeight);
+    const charsPerLine = 60; // Approximate chars per line
+    const charsPerPage = linesPerPage * charsPerLine;
 
     let pages = [];
     let currentPage = { content: "", meta: { pageNumber: 1 } };
     let charCount = 0;
+    let lineCount = 0;
 
     sections.forEach((section) => {
+      const sectionLines = section.text.split("\n").length;
+
       // If adding this section would exceed page capacity
-      if (charCount + section.text.length > charsPerPage) {
+      if (
+        lineCount + sectionLines > linesPerPage ||
+        charCount + section.text.length > charsPerPage
+      ) {
         // Finish current page
         pages.push(currentPage);
 
@@ -79,6 +110,7 @@ export default function AdvancedHandwritingApp() {
           },
         };
         charCount = section.text.length;
+        lineCount = sectionLines;
       } else {
         // Add section to current page
         const startIndex = currentPage.content.length;
@@ -94,6 +126,7 @@ export default function AdvancedHandwritingApp() {
         });
 
         charCount += section.text.length;
+        lineCount += sectionLines;
       }
     });
 
@@ -116,7 +149,6 @@ export default function AdvancedHandwritingApp() {
     // - Questions (lines ending with ?)
     // - Answers (lines following questions)
 
-    // For this demo, we'll use a simplified approach
     const lines = rawContent.split("\n");
     const sections = [];
 
@@ -159,6 +191,13 @@ export default function AdvancedHandwritingApp() {
 
   const handleEditorChange = (e) => {
     setContent(e.target.value);
+  };
+
+  const handleHeaderChange = (pageIndex, value) => {
+    setPageHeaders((prev) => ({
+      ...prev,
+      [pageIndex]: value,
+    }));
   };
 
   const handleFormatClick = (format) => {
@@ -250,16 +289,48 @@ export default function AdvancedHandwritingApp() {
     }
   };
 
-  const exportToPDF = () => {
-    alert(
-      "In a production app, this would export the handwritten notes as a PDF with proper formatting"
-    );
+  const exportToPDF = async () => {
+    if (!previewRef.current) return;
 
-    // Implementation notes:
-    // 1. Use html2canvas to capture each page
-    // 2. Use jsPDF to create a PDF with A4 dimensions
-    // 3. Process each page and add to PDF
-    // 4. Preserve detected formatting in the export
+    try {
+      const pdf = new jsPDF({
+        orientation: "portrait",
+        unit: "px",
+        format: "a4",
+      });
+
+      // Get all page elements
+      const pageElements =
+        previewRef.current.querySelectorAll(".page-container");
+
+      for (let i = 0; i < pageElements.length; i++) {
+        // If not the first page, add a new page to the PDF
+        if (i > 0) {
+          pdf.addPage();
+        }
+
+        // Capture the page as an image
+        const canvas = await html2canvas(
+          pageElements[i].querySelector(".page-content"),
+          {
+            scale: 2, // Higher scale for better quality
+            useCORS: true,
+            logging: false,
+          }
+        );
+
+        const imgData = canvas.toDataURL("image/jpeg", 1.0);
+
+        // Add to PDF (A4 page size in points at 72 DPI is 595x842)
+        pdf.addImage(imgData, "JPEG", 0, 0, 595, 842);
+      }
+
+      // Save the PDF
+      pdf.save("handwritten-notes.pdf");
+    } catch (error) {
+      console.error("Error generating PDF:", error);
+      alert("Failed to export PDF. Please try again.");
+    }
   };
 
   const toggleEditMode = () => {
@@ -410,7 +481,7 @@ Regular text for answers"
             <div key={pageIndex} className="page-container shadow-lg">
               {/* A4 page - 210mm × 297mm with proper aspect ratio */}
               <div
-                className="relative bg-white overflow-hidden border"
+                className="page-content relative bg-white overflow-hidden border"
                 style={{
                   width: "100%",
                   maxWidth: "595px", // A4 width in pixels at 72dpi
@@ -418,17 +489,38 @@ Regular text for answers"
                   boxSizing: "border-box",
                 }}
               >
+                {/* Header section */}
+                <div className="absolute top-0 left-0 right-0 z-20 p-4 border-b">
+                  <input
+                    type="text"
+                    value={pageHeaders[pageIndex] || ""}
+                    onChange={(e) =>
+                      handleHeaderChange(pageIndex, e.target.value)
+                    }
+                    className="w-full text-center font-bold"
+                    style={{
+                      fontFamily: font,
+                      color,
+                      fontSize: "18px",
+                      background: "transparent",
+                      border: "none",
+                      outline: "none",
+                    }}
+                  />
+                </div>
+
                 {/* Paper background based on style */}
-                <div className="absolute inset-0">
+                <div className="absolute inset-0 top-12">
                   {paperStyle === "ruled" && (
                     <div
                       className="absolute inset-0"
                       style={{
                         backgroundImage:
                           "linear-gradient(#cedbea 1px, transparent 1px)",
-                        backgroundSize: "100% 24px",
+                        backgroundSize: `100% ${lineHeight}px`,
                         backgroundPosition: "0 -1px",
                         zIndex: 0,
+                        height: `calc(100% - ${footerHeight}px)`,
                       }}
                     />
                   )}
@@ -438,7 +530,7 @@ Regular text for answers"
                       style={{
                         backgroundImage:
                           "linear-gradient(#cedbea 1px, transparent 1px), linear-gradient(90deg, #cedbea 1px, transparent 1px)",
-                        backgroundSize: "24px 24px",
+                        backgroundSize: `${lineHeight}px ${lineHeight}px`,
                         backgroundPosition: "-1px -1px",
                         zIndex: 0,
                       }}
@@ -456,7 +548,7 @@ Regular text for answers"
 
                 {/* Handwritten content with proper formatting */}
                 <div className="relative h-full z-10">
-                  <div className="p-4 pl-16">
+                  <div className="p-4 pt-16 pl-16">
                     {page.meta.sections ? (
                       page.meta.sections.map((section, i) => {
                         // Determine styling based on section type
@@ -464,7 +556,7 @@ Regular text for answers"
                           fontFamily: font,
                           color,
                           fontSize: "20px",
-                          lineHeight: "24px",
+                          lineHeight: `${lineHeight}px`,
                           ...section.style,
                         };
 
@@ -515,7 +607,7 @@ Regular text for answers"
                           fontFamily: font,
                           color,
                           fontSize: "20px",
-                          lineHeight: "24px",
+                          lineHeight: `${lineHeight}px`,
                         }}
                         className="whitespace-pre-wrap"
                       >
