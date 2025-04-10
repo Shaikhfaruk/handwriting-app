@@ -2,13 +2,14 @@ import { useState, useRef, useEffect } from "react";
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
 
-// Rich text editor with handwriting simulation on A4 paper
 export default function EnhancedHandwritingApp() {
   const [content, setContent] = useState("");
   const [font, setFont] = useState("Caveat");
   const [color, setColor] = useState("#2563eb");
   const [pages, setPages] = useState([]);
-  const [pageHeaders, setPageHeaders] = useState({});
+  const [pageHeaders, setPageHeaders] = useState<Record<number, string>>({});
+  const [editingLine, setEditingLine] = useState(null);
+  const [editingContent, setEditingContent] = useState("");
   const editorRef = useRef(null);
   const previewRef = useRef(null);
 
@@ -74,21 +75,18 @@ export default function EnhancedHandwritingApp() {
   const [paperStyle, setPaperStyle] = useState("ruled");
   const [isEditing, setIsEditing] = useState(true);
 
-  // Format options
   const [isBold, setIsBold] = useState(false);
   const [isHeading, setIsHeading] = useState(false);
   const [isQuestion, setIsQuestion] = useState(false);
 
-  // Line height for ruled paper to ensure text alignment with lines
   const lineHeight = 24;
-  const footerHeight = 80; // Footer space height in pixels
+  const headerHeight = 60;
+  const footerHeight = 40;
 
   useEffect(() => {
-    // Process the content and split into A4 pages
     paginateContent();
   }, [content, font, color, paperStyle, isBold, isHeading, isQuestion]);
 
-  // Initialize headers for each page
   useEffect(() => {
     const initialHeaders = {};
     pages.forEach((page, index) => {
@@ -105,118 +103,271 @@ export default function EnhancedHandwritingApp() {
       return;
     }
 
-    // Split content into sections based on formatting
     const sections = parseContent(content);
 
-    // Calculate characters per A4 page (rough estimate)
-    // A4 dimensions are 210mm x 297mm
-    // Account for header and footer space
-    const writableHeight =
-      paperStyle === "ruled" ? 842 - 80 - footerHeight : 842 - 80;
+    const writableHeight = 842 - headerHeight - footerHeight;
     const linesPerPage = Math.floor(writableHeight / lineHeight);
-    const charsPerLine = 60; // Approximate chars per line
+    const charsPerLine = 60;
     const charsPerPage = linesPerPage * charsPerLine;
 
     let pages = [];
-    let currentPage = { content: "", meta: { pageNumber: 1 } };
+    let currentPage = { content: "", meta: { pageNumber: 1, sections: [] } };
     let charCount = 0;
     let lineCount = 0;
 
     sections.forEach((section) => {
-      const sectionLines = section.text.split("\n").length;
+      if (section.type === "code" || section.type === "table") {
+        const blockLines = section.text.split("\n").length;
 
-      // If adding this section would exceed page capacity
-      if (
-        lineCount + sectionLines > linesPerPage ||
-        charCount + section.text.length > charsPerPage
-      ) {
-        // Finish current page
-        pages.push(currentPage);
+        if (lineCount + blockLines > linesPerPage) {
+          pages.push(currentPage);
 
-        // Start new page
-        currentPage = {
-          content: section.text,
-          meta: {
-            pageNumber: pages.length + 1,
-            sections: [{ ...section, startIndex: 0 }],
-          },
-        };
-        charCount = section.text.length;
-        lineCount = sectionLines;
-      } else {
-        // Add section to current page
-        const startIndex = currentPage.content.length;
-        currentPage.content += section.text;
+          currentPage = {
+            content: section.text,
+            meta: {
+              pageNumber: pages.length + 1,
+              sections: [{ ...section, startIndex: 0 }],
+            },
+          };
+          charCount = section.text.length;
+          lineCount = blockLines;
+        } else {
+          const startIndex = currentPage.content.length;
+          currentPage.content += section.text;
 
-        if (!currentPage.meta.sections) {
-          currentPage.meta.sections = [];
+          currentPage.meta.sections.push({
+            ...section,
+            startIndex,
+          });
+
+          charCount += section.text.length;
+          lineCount += blockLines;
         }
+      } else {
+        const sectionLines = section.text.split("\n").length;
 
-        currentPage.meta.sections.push({
-          ...section,
-          startIndex,
-        });
+        if (
+          lineCount + sectionLines > linesPerPage ||
+          charCount + section.text.length > charsPerPage
+        ) {
+          pages.push(currentPage);
 
-        charCount += section.text.length;
-        lineCount += sectionLines;
+          currentPage = {
+            content: section.text,
+            meta: {
+              pageNumber: pages.length + 1,
+              sections: [{ ...section, startIndex: 0 }],
+            },
+          };
+          charCount = section.text.length;
+          lineCount = sectionLines;
+        } else {
+          const startIndex = currentPage.content.length;
+          currentPage.content += section.text;
+
+          currentPage.meta.sections.push({
+            ...section,
+            startIndex,
+          });
+
+          charCount += section.text.length;
+          lineCount += sectionLines;
+        }
       }
     });
 
-    // Add the last page if it has content
     if (currentPage.content) {
       pages.push(currentPage);
     }
 
-    // Ensure at least one page
     if (pages.length === 0) {
-      pages = [{ content: "", meta: { pageNumber: 1 } }];
+      pages = [{ content: "", meta: { pageNumber: 1, sections: [] } }];
     }
 
     setPages(pages);
   };
 
   const parseContent = (rawContent) => {
-    // This function would analyze the content to identify:
-    // - Headings (lines starting with # or ##)
-    // - Questions (lines ending with ?)
-    // - Answers (lines following questions)
-
     const lines = rawContent.split("\n");
     const sections = [];
 
-    lines.forEach((line) => {
+    let inTable = false;
+    let tableContent = "";
+    let tableHeaders = [];
+
+    let inCodeBlock = false;
+    let codeContent = "";
+    let codeLanguage = "";
+
+    let currentParagraph = "";
+    let currentParagraphType = "text";
+
+    const processCurrentParagraph = () => {
+      if (currentParagraph.trim()) {
+        sections.push({
+          text: currentParagraph,
+          type: currentParagraphType,
+          style: getParagraphStyle(currentParagraphType),
+        });
+        currentParagraph = "";
+        currentParagraphType = "text";
+      }
+    };
+
+    const getParagraphStyle = (type) => {
+      switch (type) {
+        case "heading1":
+          return { fontSize: "28px", fontWeight: "bold" };
+        case "heading2":
+          return { fontSize: "24px", fontWeight: "bold" };
+        case "heading3":
+          return { fontSize: "22px", fontWeight: "bold" };
+        case "question":
+          return { fontWeight: "bold", color: "#000" };
+        case "course":
+          return { fontSize: "30px", fontWeight: "bold", color: "#2563eb" };
+        default:
+          return {};
+      }
+    };
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
       const trimmed = line.trim();
 
-      if (trimmed.startsWith("# ")) {
-        // Main heading
+      if (trimmed.startsWith("```")) {
+        if (!inCodeBlock) {
+          inCodeBlock = true;
+          codeLanguage = trimmed.substring(3).trim();
+          codeContent = "";
+
+          processCurrentParagraph();
+        } else {
+          inCodeBlock = false;
+          sections.push({
+            text: codeContent,
+            type: "code",
+            language: codeLanguage,
+            style: { fontFamily: "monospace", fontSize: "16px" },
+          });
+          codeContent = "";
+        }
+        continue;
+      }
+
+      if (inCodeBlock) {
+        codeContent += line + "\n";
+        continue;
+      }
+
+      if (
+        trimmed.indexOf("|") !== -1 &&
+        trimmed.lastIndexOf("|") !== trimmed.indexOf("|")
+      ) {
+        if (!inTable) {
+          inTable = true;
+          tableContent = line + "\n";
+
+          processCurrentParagraph();
+
+          const headerRow = trimmed
+            .split("|")
+            .filter((cell) => cell.trim() !== "");
+          tableHeaders = headerRow.map((header) => header.trim());
+        } else {
+          tableContent += line + "\n";
+        }
+      } else if (inTable) {
+        inTable = false;
         sections.push({
-          text: line + "\n",
+          text: tableContent,
+          type: "table",
+          style: { fontSize: "18px" },
+          headers: tableHeaders,
+        });
+        tableContent = "";
+        tableHeaders = [];
+
+        i--;
+      } else if (trimmed.match(/^[A-Z]{2,4}\s\d{3}:/)) {
+        processCurrentParagraph();
+        sections.push({
+          text: trimmed + "\n",
+          type: "course",
+          style: { fontSize: "30px", fontWeight: "bold", color: "#2563eb" },
+        });
+      } else if (trimmed.match(/^\*\*Q\d+\.\s/) || trimmed.match(/^Q\d+\.\s/)) {
+        processCurrentParagraph();
+        let questionText = trimmed;
+
+        questionText = questionText.replace(/^\*\*(.+)\*\*$/, "$1");
+        sections.push({
+          text: questionText + "\n",
+          type: "question",
+          style: { fontWeight: "bold", color: "#000" },
+        });
+      } else if (
+        trimmed.startsWith("# ") ||
+        (trimmed.startsWith("**") &&
+          trimmed.endsWith("**") &&
+          !trimmed.includes(":"))
+      ) {
+        processCurrentParagraph();
+
+        let headingText = trimmed
+          .replace(/^# /, "")
+          .replace(/^\*\*(.+)\*\*$/, "$1");
+        sections.push({
+          text: headingText + "\n",
           type: "heading1",
           style: { fontSize: "28px", fontWeight: "bold" },
         });
       } else if (trimmed.startsWith("## ")) {
-        // Subheading
+        processCurrentParagraph();
         sections.push({
-          text: line + "\n",
+          text: trimmed.replace(/^## /, "") + "\n",
           type: "heading2",
           style: { fontSize: "24px", fontWeight: "bold" },
         });
-      } else if (trimmed.endsWith("?")) {
-        // Question
+      } else if (trimmed.endsWith("?") && trimmed.length < 100) {
+        processCurrentParagraph();
         sections.push({
-          text: line + "\n",
+          text: trimmed + "\n",
           type: "question",
           style: { fontWeight: "bold", color: "#000" },
         });
+      } else if (trimmed.match(/^\d+\.\s/)) {
+        processCurrentParagraph();
+        currentParagraph = line + "\n";
+        currentParagraphType = "listItem";
       } else {
-        // Regular text or answer
-        sections.push({
-          text: line + "\n",
-          type: "text",
-          style: {},
-        });
+        if (trimmed === "" && currentParagraph) {
+          processCurrentParagraph();
+        } else {
+          currentParagraph += line + "\n";
+        }
       }
-    });
+    }
+
+    processCurrentParagraph();
+
+    if (inTable && tableContent) {
+      sections.push({
+        text: tableContent,
+        type: "table",
+        style: { fontSize: "18px" },
+        headers: tableHeaders,
+      });
+    }
+
+    if (inCodeBlock && codeContent) {
+      sections.push({
+        text: codeContent,
+        type: "code",
+        language: codeLanguage,
+        style: { fontFamily: "monospace", fontSize: "16px" },
+      });
+    }
 
     return sections;
   };
@@ -232,6 +383,53 @@ export default function EnhancedHandwritingApp() {
     }));
   };
 
+  const handleInlineEdit = (pageIndex, sectionIndex, lineIndex, text) => {
+    const uniqueId = `${pageIndex}-${sectionIndex}-${lineIndex}`;
+    setEditingLine(uniqueId);
+    setEditingContent(text);
+  };
+
+  const saveInlineEdit = () => {
+    if (!editingLine) return;
+
+    const [pageIndex, sectionIndex, lineIndex] = editingLine
+      .split("-")
+      .map(Number);
+    const page = pages[pageIndex];
+
+    if (page && page.meta && page.meta.sections) {
+      const section = page.meta.sections[sectionIndex];
+
+      if (section) {
+        const lines = section.text.split("\n");
+
+        if (lineIndex < lines.length) {
+          lines[lineIndex] = editingContent;
+
+          const newSectionText = lines.join("\n");
+
+          let newContent = content;
+          const startIndex = section.startIndex;
+          const endIndex = startIndex + section.text.length;
+          newContent =
+            newContent.substring(0, startIndex) +
+            newSectionText +
+            newContent.substring(endIndex);
+
+          setContent(newContent);
+        }
+      }
+    }
+
+    setEditingLine(null);
+    setEditingContent("");
+  };
+
+  const cancelInlineEdit = () => {
+    setEditingLine(null);
+    setEditingContent("");
+  };
+
   const handleFormatClick = (format) => {
     switch (format) {
       case "bold":
@@ -239,9 +437,8 @@ export default function EnhancedHandwritingApp() {
         break;
       case "heading":
         setIsHeading(!isHeading);
-        setIsQuestion(false); // Reset question format
+        setIsQuestion(false);
 
-        // Insert heading markdown at cursor position
         if (!isHeading && editorRef.current) {
           const cursorPos = editorRef.current.selectionStart;
           const textBefore = content.substring(0, cursorPos);
@@ -249,16 +446,13 @@ export default function EnhancedHandwritingApp() {
           const lineStart = textBefore.lastIndexOf("\n") + 1;
 
           if (textBefore.substring(lineStart).startsWith("# ")) {
-            // Already a heading, do nothing
           } else if (textBefore.substring(lineStart).startsWith("## ")) {
-            // Convert subheading to heading
             const newTextBefore =
               textBefore.substring(0, lineStart) +
               "# " +
               textBefore.substring(lineStart + 3);
             setContent(newTextBefore + textAfter);
           } else {
-            // Add heading
             const newTextBefore =
               textBefore.substring(0, lineStart) +
               "# " +
@@ -269,9 +463,8 @@ export default function EnhancedHandwritingApp() {
         break;
       case "subheading":
         setIsHeading(!isHeading);
-        setIsQuestion(false); // Reset question format
+        setIsQuestion(false);
 
-        // Insert subheading markdown at cursor position
         if (!isHeading && editorRef.current) {
           const cursorPos = editorRef.current.selectionStart;
           const textBefore = content.substring(0, cursorPos);
@@ -279,16 +472,13 @@ export default function EnhancedHandwritingApp() {
           const lineStart = textBefore.lastIndexOf("\n") + 1;
 
           if (textBefore.substring(lineStart).startsWith("## ")) {
-            // Already a subheading, do nothing
           } else if (textBefore.substring(lineStart).startsWith("# ")) {
-            // Convert heading to subheading
             const newTextBefore =
               textBefore.substring(0, lineStart) +
               "## " +
               textBefore.substring(lineStart + 2);
             setContent(newTextBefore + textAfter);
           } else {
-            // Add subheading
             const newTextBefore =
               textBefore.substring(0, lineStart) +
               "## " +
@@ -299,9 +489,8 @@ export default function EnhancedHandwritingApp() {
         break;
       case "question":
         setIsQuestion(!isQuestion);
-        setIsHeading(false); // Reset heading format
+        setIsHeading(false);
 
-        // Add question mark at the end of the line if not present
         if (!isQuestion && editorRef.current) {
           const cursorPos = editorRef.current.selectionStart;
           const textBefore = content.substring(0, cursorPos);
@@ -318,6 +507,87 @@ export default function EnhancedHandwritingApp() {
           }
         }
         break;
+      case "table":
+        if (editorRef.current) {
+          const cursorPos = editorRef.current.selectionStart;
+          const textBefore = content.substring(0, cursorPos);
+          const textAfter = content.substring(cursorPos);
+          const tableTemplate =
+            "\n| Header 1 | Header 2 | Header 3 |\n" +
+            "|----------|----------|----------|\n" +
+            "| Cell 1   | Cell 2   | Cell 3   |\n" +
+            "| Cell 4   | Cell 5   | Cell 6   |\n";
+
+          setContent(textBefore + tableTemplate + textAfter);
+        }
+        break;
+      case "code":
+        if (editorRef.current) {
+          const cursorPos = editorRef.current.selectionStart;
+          const textBefore = content.substring(0, cursorPos);
+          const textAfter = content.substring(cursorPos);
+          const codeTemplate = "\n```python\n# Your code here\n```\n";
+
+          setContent(textBefore + codeTemplate + textAfter);
+        }
+        break;
+      case "course":
+        if (editorRef.current) {
+          const cursorPos = editorRef.current.selectionStart;
+          const textBefore = content.substring(0, cursorPos);
+          const textAfter = content.substring(cursorPos);
+          const courseTemplate = "\nCOURSE 101: Course Title\n";
+
+          setContent(textBefore + courseTemplate + textAfter);
+        }
+        break;
+    }
+  };
+
+  const handlePaste = (e) => {
+    const clipboardData = e.clipboardData;
+    if (clipboardData && clipboardData.getData) {
+      const pastedText = clipboardData.getData("text/plain");
+
+      if (editorRef.current) {
+        const cursorPos = editorRef.current.selectionStart;
+        const textBefore = content.substring(0, cursorPos);
+        const textAfter = content.substring(cursorPos);
+
+        let processedText = pastedText;
+
+        const codeBlockRegex = /^```[\s\S]*?```$/m;
+        if (!codeBlockRegex.test(processedText)) {
+          const codeLines = processedText
+            .split("\n")
+            .filter(
+              (line) =>
+                line.trim().startsWith("# ") ||
+                line.includes(" = ") ||
+                line.includes("def ") ||
+                line.includes("class ") ||
+                line.includes("import ") ||
+                line.includes("print(")
+            );
+
+          if (codeLines.length >= 3 && !processedText.includes("```")) {
+            if (
+              codeLines.some(
+                (line) =>
+                  line.includes("def ") ||
+                  line.includes("import ") ||
+                  line.includes("print(")
+              )
+            ) {
+              processedText = "```python\n" + processedText + "\n```";
+            }
+          }
+        }
+
+        setContent(textBefore + processedText + textAfter);
+
+        e.preventDefault();
+      }
     }
   };
 
@@ -331,21 +601,18 @@ export default function EnhancedHandwritingApp() {
         format: "a4",
       });
 
-      // Get all page elements
       const pageElements =
         previewRef.current.querySelectorAll(".page-container");
 
       for (let i = 0; i < pageElements.length; i++) {
-        // If not the first page, add a new page to the PDF
         if (i > 0) {
           pdf.addPage();
         }
 
-        // Capture the page as an image
         const canvas = await html2canvas(
           pageElements[i].querySelector(".page-content"),
           {
-            scale: 2, // Higher scale for better quality
+            scale: 2,
             useCORS: true,
             logging: false,
           }
@@ -353,11 +620,9 @@ export default function EnhancedHandwritingApp() {
 
         const imgData = canvas.toDataURL("image/jpeg", 1.0);
 
-        // Add to PDF (A4 page size in points at 72 DPI is 595x842)
         pdf.addImage(imgData, "JPEG", 0, 0, 595, 842);
       }
 
-      // Save the PDF
       pdf.save("handwritten-notes.pdf");
     } catch (error) {
       console.error("Error generating PDF:", error);
@@ -367,6 +632,101 @@ export default function EnhancedHandwritingApp() {
 
   const toggleEditMode = () => {
     setIsEditing(!isEditing);
+  };
+
+  const renderTable = (tableText, fontFamily, fontColor) => {
+    const rows = tableText.trim().split("\n");
+    if (rows.length < 2) return null;
+
+    const headerCells = rows[0]
+      .split("|")
+      .filter((cell) => cell.trim() !== "")
+      .map((cell) => cell.trim());
+
+    const dataStartIndex = rows[1].includes("-") ? 2 : 1;
+
+    const dataRows = rows.slice(dataStartIndex).map((row) =>
+      row
+        .split("|")
+        .filter((cell) => cell.trim() !== "")
+        .map((cell) => cell.trim())
+    );
+
+    return (
+      <div className="table-container mt-2 mb-2">
+        <table
+          className="border-collapse w-full"
+          style={{ fontFamily, color: fontColor }}
+        >
+          <thead>
+            <tr className="border-b border-gray-400">
+              {headerCells.map((cell, i) => (
+                <th
+                  key={i}
+                  className="p-2 text-left"
+                  style={{ fontWeight: "bold" }}
+                >
+                  {cell}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {dataRows.map((row, rowIndex) => (
+              <tr key={rowIndex} className="border-b border-gray-300">
+                {row.map((cell, cellIndex) => (
+                  <td key={cellIndex} className="p-2">
+                    {cell}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  };
+
+  const renderCodeBlock = (codeText, language, fontFamily, fontColor) => {
+    return (
+      <div className="code-block-container mt-2 mb-2 rounded bg-gray-100 p-2 overflow-auto">
+        <pre
+          className="text-sm"
+          style={{ fontFamily: "monospace", lineHeight: "1.5" }}
+        >
+          <code>{codeText}</code>
+        </pre>
+      </div>
+    );
+  };
+
+  const renderFormattedLine = (line, fontFamily, fontColor) => {
+    let formattedLine = line;
+
+    formattedLine = formattedLine.replace(/\*\*(.*?)\*\*/g, (match, p1) => {
+      return `<strong>${p1}</strong>`;
+    });
+
+    formattedLine = formattedLine.replace(/\*(.*?)\*/g, (match, p1) => {
+      return `<em>${p1}</em>`;
+    });
+
+    formattedLine = formattedLine.replace(/__(.*?)__/g, (match, p1) => {
+      return `<u>${p1}</u>`;
+    });
+
+    if (formattedLine.match(/^\d+\.\s/)) {
+      const number = formattedLine.match(/^\d+/)[0];
+      const text = formattedLine.replace(/^\d+\.\s/, "");
+      return (
+        <div className="flex">
+          <span className="mr-2 font-bold">{number}.</span>
+          <span dangerouslySetInnerHTML={{ __html: text }} />
+        </div>
+      );
+    }
+
+    return <span dangerouslySetInnerHTML={{ __html: formattedLine }} />;
   };
 
   return (
@@ -425,7 +785,7 @@ export default function EnhancedHandwritingApp() {
           </div>
         </div>
 
-        <div className="flex gap-2 mb-4">
+        <div className="flex flex-wrap gap-2 mb-4">
           <button
             onClick={() => handleFormatClick("heading")}
             className={`px-2 py-1 rounded border ${
@@ -462,6 +822,27 @@ export default function EnhancedHandwritingApp() {
           >
             B
           </button>
+          <button
+            onClick={() => handleFormatClick("table")}
+            className="px-2 py-1 rounded border"
+            title="Insert Table"
+          >
+            Table
+          </button>
+          <button
+            onClick={() => handleFormatClick("code")}
+            className="px-2 py-1 rounded border"
+            title="Insert Code Block"
+          >
+            Code
+          </button>
+          <button
+            onClick={() => handleFormatClick("course")}
+            className="px-2 py-1 rounded border"
+            title="Insert Course Header"
+          >
+            Course
+          </button>
         </div>
 
         <div className="mb-4">
@@ -470,12 +851,29 @@ export default function EnhancedHandwritingApp() {
               ref={editorRef}
               value={content}
               onChange={handleEditorChange}
+              onPaste={handlePaste}
               placeholder="Start typing your text here... 
               
 # Use # for main headings
 ## Use ## for subheadings
 End with ? for questions
-Regular text for answers"
+Regular text for answers
+Use | to create tables like:
+| Header 1 | Header 2 |
+|----------|----------|
+| Cell 1   | Cell 2   |
+
+For code blocks:
+```python
+def example():
+    return 'code'
+```
+
+For course headers:
+COURSE 101: Course Title
+
+For bold text:
+**This text will be bold**"
               className="border rounded p-2 w-full h-64 font-mono"
             />
           ) : (
@@ -516,8 +914,8 @@ Regular text for answers"
                 className="page-content relative bg-white overflow-hidden border"
                 style={{
                   width: "100%",
-                  maxWidth: "595px", // A4 width in pixels at 72dpi
-                  height: "842px", // A4 height in pixels at 72dpi
+                  maxWidth: "595px",
+                  height: "842px",
                   boxSizing: "border-box",
                 }}
               >
@@ -542,7 +940,10 @@ Regular text for answers"
                 </div>
 
                 {/* Paper background based on style */}
-                <div className="absolute inset-0 top-12">
+                <div
+                  className="absolute inset-0"
+                  style={{ top: headerHeight, bottom: footerHeight }}
+                >
                   {paperStyle === "ruled" && (
                     <div
                       className="absolute inset-0"
@@ -552,7 +953,6 @@ Regular text for answers"
                         backgroundSize: `100% ${lineHeight}px`,
                         backgroundPosition: "0 -1px",
                         zIndex: 0,
-                        height: `calc(100% - ${footerHeight}px)`,
                       }}
                     />
                   )}
@@ -572,7 +972,13 @@ Regular text for answers"
                   {/* Left margin */}
                   {paperStyle !== "blank" && (
                     <div
-                      className="absolute inset-y-0 left-12 border-l border-red-300"
+                      className="absolute inset-y-0 left-14 border-l border-red-300"
+                      style={{ zIndex: 1 }}
+                    />
+                  )}
+                  {paperStyle !== "blank" && (
+                    <div
+                      className="absolute inset-y-0 left-[59px] border-l border-red-300"
                       style={{ zIndex: 1 }}
                     />
                   )}
@@ -580,10 +986,12 @@ Regular text for answers"
 
                 {/* Handwritten content with proper formatting */}
                 <div className="relative h-full z-10">
-                  <div className="p-4 pt-16 pl-16">
+                  <div
+                    className="p-4 pt-16 pl-16"
+                    style={{ paddingBottom: `${footerHeight}px` }}
+                  >
                     {page.meta.sections ? (
-                      page.meta.sections.map((section, i) => {
-                        // Determine styling based on section type
+                      page.meta.sections.map((section, sectionIndex) => {
                         let sectionStyle = {
                           fontFamily: font,
                           color,
@@ -613,9 +1021,48 @@ Regular text for answers"
                             ...sectionStyle,
                             fontWeight: "bold",
                           };
+                        } else if (section.type === "course") {
+                          sectionStyle = {
+                            ...sectionStyle,
+                            fontSize: "30px",
+                            fontWeight: "bold",
+                            color: "#2563eb",
+                            marginTop: "8px",
+                            marginBottom: "8px",
+                          };
                         }
 
-                        // Format text - remove markdown symbols for display
+                        if (section.type === "code") {
+                          return (
+                            <div
+                              key={`section-${sectionIndex}`}
+                              style={{ marginBottom: "8px" }}
+                            >
+                              {renderCodeBlock(
+                                section.text,
+                                section.language,
+                                sectionStyle.fontFamily,
+                                sectionStyle.color
+                              )}
+                            </div>
+                          );
+                        }
+
+                        if (section.type === "table") {
+                          return (
+                            <div
+                              key={`section-${sectionIndex}`}
+                              style={{ marginBottom: "8px" }}
+                            >
+                              {renderTable(
+                                section.text,
+                                sectionStyle.fontFamily,
+                                sectionStyle.color
+                              )}
+                            </div>
+                          );
+                        }
+
                         let displayText = section.text;
                         if (section.type === "heading1") {
                           displayText = displayText.replace(/^# /, "");
@@ -623,13 +1070,66 @@ Regular text for answers"
                           displayText = displayText.replace(/^## /, "");
                         }
 
+                        const lines = displayText.split("\n");
+
                         return (
                           <div
-                            key={i}
-                            style={sectionStyle}
-                            className="whitespace-pre-wrap"
+                            key={`section-${sectionIndex}`}
+                            style={{ marginBottom: "4px" }}
                           >
-                            {displayText}
+                            {lines.map((line, lineIndex) => {
+                              const uniqueId = `${pageIndex}-${sectionIndex}-${lineIndex}`;
+
+                              if (!line.trim()) return null;
+
+                              if (editingLine === uniqueId) {
+                                return (
+                                  <div
+                                    key={`line-${lineIndex}`}
+                                    className="relative"
+                                  >
+                                    <input
+                                      type="text"
+                                      value={editingContent}
+                                      onChange={(e) =>
+                                        setEditingContent(e.target.value)
+                                      }
+                                      style={sectionStyle}
+                                      className="w-full bg-blue-50 border border-blue-300 outline-none px-2"
+                                      autoFocus
+                                      onBlur={saveInlineEdit}
+                                      onKeyDown={(e) => {
+                                        if (e.key === "Enter") saveInlineEdit();
+                                        if (e.key === "Escape")
+                                          cancelInlineEdit();
+                                      }}
+                                    />
+                                  </div>
+                                );
+                              }
+
+                              return (
+                                <div
+                                  key={`line-${lineIndex}`}
+                                  style={sectionStyle}
+                                  className="cursor-text hover:bg-gray-50"
+                                  onClick={() =>
+                                    handleInlineEdit(
+                                      pageIndex,
+                                      sectionIndex,
+                                      lineIndex,
+                                      line
+                                    )
+                                  }
+                                >
+                                  {renderFormattedLine(
+                                    line,
+                                    sectionStyle.fontFamily,
+                                    sectionStyle.color
+                                  )}
+                                </div>
+                              );
+                            })}
                           </div>
                         );
                       })
@@ -647,14 +1147,6 @@ Regular text for answers"
                       </div>
                     )}
                   </div>
-                </div>
-
-                {/* Page number */}
-                <div
-                  className="absolute bottom-2 right-4 text-sm text-gray-500"
-                  style={{ zIndex: 2 }}
-                >
-                  Page {page.meta.pageNumber} of {pages.length}
                 </div>
               </div>
             </div>
