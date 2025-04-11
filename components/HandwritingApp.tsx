@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
+import { fonts } from "@/app/utils/enums";
 
 export default function EnhancedHandwritingApp() {
   const [content, setContent] = useState("");
@@ -8,54 +9,17 @@ export default function EnhancedHandwritingApp() {
   const [color, setColor] = useState("#2563eb");
   const [pages, setPages] = useState([]);
   const [pageHeaders, setPageHeaders] = useState<Record<number, string>>({});
+  const [headerAlignments, setHeaderAlignments] = useState<
+    Record<number, string>
+  >({});
   const [editingLine, setEditingLine] = useState(null);
   const [editingContent, setEditingContent] = useState("");
+  const [lineAlignments, setLineAlignments] = useState<Record<string, string>>(
+    {}
+  );
+  const [showingControls, setShowingControls] = useState<string | null>(null);
   const editorRef = useRef(null);
   const previewRef = useRef(null);
-
-  const fonts = [
-    {
-      name: "Caveat",
-      label: "Casual Handwriting",
-      family: "'Caveat', cursive",
-    },
-    {
-      name: "Homemade Apple",
-      label: "Neat Handwriting",
-      family: "'Homemade Apple', cursive",
-    },
-    {
-      name: "Reenie Beanie",
-      label: "Quick Notes",
-      family: "'Reenie Beanie', cursive",
-    },
-    {
-      name: "Rock Salt",
-      label: "Blocky Letters",
-      family: "'Rock Salt', cursive",
-    },
-    {
-      name: "Indie Flower",
-      label: "School Notes",
-      family: "'Indie Flower', cursive",
-    },
-    {
-      name: "QEBradenHill",
-      label: "Braden Hill",
-      family: "'QEBradenHill', cursive",
-    },
-    {
-      name: "QEDavidReid",
-      label: "David Reid",
-      family: "'QEDavidReid', cursive",
-    },
-    {
-      name: "Dancing Script",
-      label: "Elegant Script",
-      family: "'Dancing Script', cursive",
-    },
-    { name: "Kalam", label: "Natural Notes", family: "'Kalam', cursive" },
-  ];
 
   const colors = [
     { value: "#2563eb", label: "Blue" },
@@ -74,6 +38,7 @@ export default function EnhancedHandwritingApp() {
 
   const [paperStyle, setPaperStyle] = useState("ruled");
   const [isEditing, setIsEditing] = useState(true);
+  const [lineInputMode, setLineInputMode] = useState(false);
 
   const [isBold, setIsBold] = useState(false);
   const [isHeading, setIsHeading] = useState(false);
@@ -89,12 +54,17 @@ export default function EnhancedHandwritingApp() {
 
   useEffect(() => {
     const initialHeaders = {};
+    const initialHeaderAlignments = {};
     pages.forEach((page, index) => {
       if (!pageHeaders[index]) {
         initialHeaders[index] = `Notes - ${page.meta.pageNumber}`;
       }
+      if (!headerAlignments[index]) {
+        initialHeaderAlignments[index] = "center";
+      }
     });
     setPageHeaders((prev) => ({ ...prev, ...initialHeaders }));
+    setHeaderAlignments((prev) => ({ ...prev, ...initialHeaderAlignments }));
   }, [pages]);
 
   const paginateContent = () => {
@@ -383,6 +353,22 @@ export default function EnhancedHandwritingApp() {
     }));
   };
 
+  const handleHeaderAlignment = (pageIndex, alignment) => {
+    setHeaderAlignments((prev) => ({
+      ...prev,
+      [pageIndex]: alignment,
+    }));
+    setShowingControls(null);
+  };
+
+  const handleTextAlignment = (lineId, alignment) => {
+    setLineAlignments((prev) => ({
+      ...prev,
+      [lineId]: alignment,
+    }));
+    setShowingControls(null);
+  };
+
   const handleInlineEdit = (pageIndex, sectionIndex, lineIndex, text) => {
     const uniqueId = `${pageIndex}-${sectionIndex}-${lineIndex}`;
     setEditingLine(uniqueId);
@@ -446,6 +432,7 @@ export default function EnhancedHandwritingApp() {
           const lineStart = textBefore.lastIndexOf("\n") + 1;
 
           if (textBefore.substring(lineStart).startsWith("# ")) {
+            // Already a heading
           } else if (textBefore.substring(lineStart).startsWith("## ")) {
             const newTextBefore =
               textBefore.substring(0, lineStart) +
@@ -472,6 +459,7 @@ export default function EnhancedHandwritingApp() {
           const lineStart = textBefore.lastIndexOf("\n") + 1;
 
           if (textBefore.substring(lineStart).startsWith("## ")) {
+            // Already a subheading
           } else if (textBefore.substring(lineStart).startsWith("# ")) {
             const newTextBefore =
               textBefore.substring(0, lineStart) +
@@ -540,6 +528,9 @@ export default function EnhancedHandwritingApp() {
 
           setContent(textBefore + courseTemplate + textAfter);
         }
+        break;
+      case "lineInputMode":
+        setLineInputMode(!lineInputMode);
         break;
     }
   };
@@ -700,7 +691,104 @@ export default function EnhancedHandwritingApp() {
     );
   };
 
-  const renderFormattedLine = (line, fontFamily, fontColor) => {
+  const renderAlignmentControls = (id) => {
+    return (
+      <div className="absolute right-0 top-0 bg-blue-50 border border-blue-200 rounded shadow-sm flex gap-1 z-30">
+        <button
+          className="p-1 hover:bg-blue-100"
+          onClick={() => {
+            if (id.startsWith("header-")) {
+              handleHeaderAlignment(
+                parseInt(id.replace("header-", "")),
+                "left"
+              );
+            } else {
+              handleTextAlignment(id, "left");
+            }
+          }}
+          title="Align Left"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <line x1="3" y1="6" x2="21" y2="6"></line>
+            <line x1="3" y1="12" x2="15" y2="12"></line>
+            <line x1="3" y1="18" x2="18" y2="18"></line>
+          </svg>
+        </button>
+        <button
+          className="p-1 hover:bg-blue-100"
+          onClick={() => {
+            if (id.startsWith("header-")) {
+              handleHeaderAlignment(
+                parseInt(id.replace("header-", "")),
+                "center"
+              );
+            } else {
+              handleTextAlignment(id, "center");
+            }
+          }}
+          title="Center"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <line x1="3" y1="6" x2="21" y2="6"></line>
+            <line x1="6" y1="12" x2="18" y2="12"></line>
+            <line x1="4" y1="18" x2="20" y2="18"></line>
+          </svg>
+        </button>
+        <button
+          className="p-1 hover:bg-blue-100"
+          onClick={() => {
+            if (id.startsWith("header-")) {
+              handleHeaderAlignment(
+                parseInt(id.replace("header-", "")),
+                "right"
+              );
+            } else {
+              handleTextAlignment(id, "right");
+            }
+          }}
+          title="Align Right"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <line x1="3" y1="6" x2="21" y2="6"></line>
+            <line x1="9" y1="12" x2="21" y2="12"></line>
+            <line x1="6" y1="18" x2="21" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+    );
+  };
+
+  const renderFormattedLine = (line, fontFamily, fontColor, lineId) => {
     let formattedLine = line;
 
     formattedLine = formattedLine.replace(/\*\*(.*?)\*\*/g, (match, p1) => {
@@ -726,7 +814,65 @@ export default function EnhancedHandwritingApp() {
       );
     }
 
-    return <span dangerouslySetInnerHTML={{ __html: formattedLine }} />;
+    const alignment = lineAlignments[lineId] || "left";
+
+    return (
+      <span
+        dangerouslySetInnerHTML={{ __html: formattedLine }}
+        style={{ textAlign: alignment, display: "block" }}
+      />
+    );
+  };
+
+  const renderLineInput = (
+    pageIndex,
+    sectionIndex,
+    lineIndex,
+    line,
+    sectionStyle
+  ) => {
+    const lineId = `${pageIndex}-${sectionIndex}-${lineIndex}`;
+    const alignment = lineAlignments[lineId] || "left";
+
+    return (
+      <div key={lineId} className="relative">
+        <input
+          type="text"
+          defaultValue={line}
+          style={{
+            ...sectionStyle,
+            textAlign: alignment,
+            border: "none",
+            borderBottom: paperStyle !== "blank" ? "none" : "1px dashed #ccc",
+            background: "transparent",
+            width: "100%",
+            outline: "none",
+            height: `${lineHeight}px`,
+            lineHeight: `${lineHeight}px`,
+            padding: "0 4px",
+          }}
+          className="hover:bg-blue-50 focus:bg-white focus:border-blue-300"
+          onBlur={(e) => {
+            handleInlineEdit(
+              pageIndex,
+              sectionIndex,
+              lineIndex,
+              e.target.value
+            );
+            saveInlineEdit();
+          }}
+          onMouseEnter={() => setShowingControls(lineId)}
+          onMouseLeave={() => {
+            if (showingControls === lineId) {
+              setTimeout(() => {
+                setShowingControls(null);
+              }, 500);
+            }
+          }}
+        />
+        {showingControls === lineId && renderAlignmentControls(lineId)}
+      </div>
+    );
   };
 
   return (
@@ -843,6 +989,15 @@ export default function EnhancedHandwritingApp() {
           >
             Course
           </button>
+          <button
+            onClick={() => handleFormatClick("lineInputMode")}
+            className={`px-2 py-1 rounded border ${
+              lineInputMode ? "bg-blue-100" : ""
+            }`}
+            title="Toggle Line-by-Line Input Mode"
+          >
+            Line Input Mode
+          </button>
         </div>
 
         <div className="mb-4">
@@ -920,23 +1075,44 @@ For bold text:
                 }}
               >
                 {/* Header section */}
-                <div className="absolute top-0 left-0 right-0 z-20 p-4 border-b">
-                  <input
-                    type="text"
-                    value={pageHeaders[pageIndex] || ""}
-                    onChange={(e) =>
-                      handleHeaderChange(pageIndex, e.target.value)
+                <div
+                  className="absolute top-0 left-0 right-0 z-20 p-4 border-b"
+                  onMouseEnter={() => setShowingControls(`header-${pageIndex}`)}
+                  onMouseLeave={() => {
+                    if (showingControls === `header-${pageIndex}`) {
+                      setTimeout(() => {
+                        setShowingControls(null);
+                      }, 500);
                     }
-                    className="w-full text-center font-bold"
-                    style={{
-                      fontFamily: font,
-                      color,
-                      fontSize: "18px",
-                      background: "transparent",
-                      border: "none",
-                      outline: "none",
-                    }}
-                  />
+                  }}
+                >
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={pageHeaders[pageIndex] || ""}
+                      onChange={(e) =>
+                        handleHeaderChange(pageIndex, e.target.value)
+                      }
+                      className="w-full"
+                      style={{
+                        fontFamily: font,
+                        color,
+                        fontSize: "18px",
+                        background: "transparent",
+                        border: "none",
+                        outline: "none",
+                        textAlign:
+                          (headerAlignments[pageIndex] as
+                            | "left"
+                            | "center"
+                            | "right") || "center",
+                        fontWeight: "bold",
+                        height: `${headerHeight - 8}px`,
+                      }}
+                    />
+                    {showingControls === `header-${pageIndex}` &&
+                      renderAlignmentControls(`header-${pageIndex}`)}
+                  </div>
                 </div>
 
                 {/* Paper background based on style */}
@@ -951,7 +1127,7 @@ For bold text:
                         backgroundImage:
                           "linear-gradient(#cedbea 1px, transparent 1px)",
                         backgroundSize: `100% ${lineHeight}px`,
-                        backgroundPosition: "0 -1px",
+                        backgroundPosition: "0 0",
                         zIndex: 0,
                       }}
                     />
@@ -963,7 +1139,7 @@ For bold text:
                         backgroundImage:
                           "linear-gradient(#cedbea 1px, transparent 1px), linear-gradient(90deg, #cedbea 1px, transparent 1px)",
                         backgroundSize: `${lineHeight}px ${lineHeight}px`,
-                        backgroundPosition: "-1px -1px",
+                        backgroundPosition: "0 0",
                         zIndex: 0,
                       }}
                     />
@@ -1078,15 +1254,16 @@ For bold text:
                             style={{ marginBottom: "4px" }}
                           >
                             {lines.map((line, lineIndex) => {
-                              const uniqueId = `${pageIndex}-${sectionIndex}-${lineIndex}`;
+                              const lineId = `${pageIndex}-${sectionIndex}-${lineIndex}`;
 
                               if (!line.trim()) return null;
 
-                              if (editingLine === uniqueId) {
+                              if (editingLine === lineId) {
                                 return (
                                   <div
                                     key={`line-${lineIndex}`}
                                     className="relative"
+                                    style={{ height: `${lineHeight}px` }}
                                   >
                                     <input
                                       type="text"
@@ -1094,7 +1271,14 @@ For bold text:
                                       onChange={(e) =>
                                         setEditingContent(e.target.value)
                                       }
-                                      style={sectionStyle}
+                                      style={{
+                                        ...sectionStyle,
+                                        width: "100%",
+                                        height: `${lineHeight}px`,
+                                        lineHeight: `${lineHeight}px`,
+                                        textAlign:
+                                          lineAlignments[lineId] || "left",
+                                      }}
                                       className="w-full bg-blue-50 border border-blue-300 outline-none px-2"
                                       autoFocus
                                       onBlur={saveInlineEdit}
@@ -1108,25 +1292,61 @@ For bold text:
                                 );
                               }
 
+                              // Line-by-line input mode
+                              if (lineInputMode) {
+                                return renderLineInput(
+                                  pageIndex,
+                                  sectionIndex,
+                                  lineIndex,
+                                  line,
+                                  sectionStyle
+                                );
+                              }
+
+                              // Regular display mode with hover controls
                               return (
                                 <div
                                   key={`line-${lineIndex}`}
-                                  style={sectionStyle}
-                                  className="cursor-text hover:bg-gray-50"
-                                  onClick={() =>
-                                    handleInlineEdit(
-                                      pageIndex,
-                                      sectionIndex,
-                                      lineIndex,
-                                      line
-                                    )
+                                  className="relative"
+                                  onMouseEnter={() =>
+                                    setShowingControls(lineId)
                                   }
+                                  onMouseLeave={() => {
+                                    if (showingControls === lineId) {
+                                      setTimeout(() => {
+                                        setShowingControls(null);
+                                      }, 500);
+                                    }
+                                  }}
                                 >
-                                  {renderFormattedLine(
-                                    line,
-                                    sectionStyle.fontFamily,
-                                    sectionStyle.color
-                                  )}
+                                  <div
+                                    style={{
+                                      ...sectionStyle,
+                                      cursor: "text",
+                                      padding: "0 4px",
+                                      minHeight: `${lineHeight}px`,
+                                      textAlign:
+                                        lineAlignments[lineId] || "left",
+                                    }}
+                                    className="hover:bg-gray-50"
+                                    onClick={() =>
+                                      handleInlineEdit(
+                                        pageIndex,
+                                        sectionIndex,
+                                        lineIndex,
+                                        line
+                                      )
+                                    }
+                                  >
+                                    {renderFormattedLine(
+                                      line,
+                                      sectionStyle.fontFamily,
+                                      sectionStyle.color,
+                                      lineId
+                                    )}
+                                  </div>
+                                  {showingControls === lineId &&
+                                    renderAlignmentControls(lineId)}
                                 </div>
                               );
                             })}
